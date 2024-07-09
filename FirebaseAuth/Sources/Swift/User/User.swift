@@ -202,7 +202,7 @@ extension User: NSSecureCoding {}
   @available(iOS 13, tvOS 13, macOS 10.15, macCatalyst 13, watchOS 7, *)
   open func updatePassword(to password: String) async throws {
     guard password.count > 0 else {
-        throw AuthErrorUtils.weakPasswordError(serverResponseReason: "Missing Password")
+      throw AuthErrorUtils.weakPasswordError(serverResponseReason: "Missing Password")
     }
     return try await auth.authWorker.updateEmail(user: self, email: nil, password: password)
   }
@@ -400,7 +400,7 @@ extension User: NSSecureCoding {}
   @available(iOS 13, tvOS 13, macOS 10.15, macCatalyst 13, watchOS 7, *)
   @discardableResult
   open func reauthenticate(with credential: AuthCredential) async throws -> AuthDataResult {
-    return try await self.auth.authWorker.reauthenticate(with: credential)
+    return try await auth.authWorker.reauthenticate(with: credential)
   }
 
   #if os(iOS)
@@ -1184,8 +1184,6 @@ extension User: NSSecureCoding {}
 
   // MARK: Private functions
 
-
-
   /// Sets a new token service for the `User` instance.
   ///
   /// The method makes sure the token service has access and refresh token and the new tokens
@@ -1193,7 +1191,7 @@ extension User: NSSecureCoding {}
   /// - Parameter tokenService: The new token service object.
   /// - Parameter callback: The block to be called in the global auth working queue once finished.
   func setTokenService(tokenService: SecureTokenService,
-                               callback: @escaping (Error?) -> Void) {
+                       callback: @escaping (Error?) -> Void) {
     tokenService.fetchAccessToken(forcingRefresh: false) { token, error, tokenUpdated in
       if let error {
         callback(error)
@@ -1215,7 +1213,7 @@ extension User: NSSecureCoding {}
   /// - Parameter tokenService: The new token service object.
   func setTokenService(tokenService: SecureTokenService) async throws {
     self.tokenService = tokenService
-    if let error = self.updateKeychain() {
+    if let error = updateKeychain() {
       throw error
     }
   }
@@ -1380,9 +1378,9 @@ extension User: NSSecureCoding {}
             guard let auth = self.auth else {
               fatalError("Internal Auth error: missing auth instance on user")
             }
-          let response = try await auth.authWorker.injectRecaptcha(request: request,
-                                                          action: AuthRecaptchaAction
-                                                            .signUpPassword)
+            let response = try await auth.authWorker.injectRecaptcha(request: request,
+                                                                     action: AuthRecaptchaAction
+                                                                       .signUpPassword)
           #else
             let response = try await AuthBackend.call(with: request)
           #endif
@@ -1503,7 +1501,6 @@ extension User: NSSecureCoding {}
       }
     }
   }
-
 
   private func link(withEmailCredential emailCredential: EmailAuthCredential,
                     completion: ((AuthDataResult?, Error?) -> Void)?) {
@@ -1723,15 +1720,16 @@ extension User: NSSecureCoding {}
     do {
       let (token, tokenUpdated) = try await tokenService.fetchAccessToken(
         user: self,
-                                                forcingRefresh: forceRefresh)
+        forcingRefresh: forceRefresh
+      )
       if tokenUpdated {
-        if let error = self.updateKeychain() {
+        if let error = updateKeychain() {
           throw error
         }
       }
       return token!
     } catch {
-      self.signOutIfTokenIsInvalid(withError: error)
+      signOutIfTokenIsInvalid(withError: error)
       throw error
     }
   }

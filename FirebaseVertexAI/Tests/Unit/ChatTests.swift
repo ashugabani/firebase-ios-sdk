@@ -32,16 +32,21 @@ final class ChatTests: XCTestCase {
   }
 
   func testMergingText() async throws {
-    let fileURL = try XCTUnwrap(Bundle.module.url(
+    #if SWIFT_PACKAGE
+      let bundle = Bundle.module
+    #else // SWIFT_PACKAGE
+      let bundle = Bundle(for: Self.self)
+    #endif // SWIFT_PACKAGE
+    let fileURL = try XCTUnwrap(bundle.url(
       forResource: "streaming-success-basic-reply-parts",
       withExtension: "txt"
     ))
 
     // Skip tests using MockURLProtocol on watchOS; unsupported in watchOS 2 and later, see
     // https://developer.apple.com/documentation/foundation/urlprotocol for details.
-    guard #unavailable(watchOS 2) else {
+    #if os(watchOS)
       throw XCTSkip("Custom URL protocols are unsupported in watchOS 2 and later.")
-    }
+    #endif // os(watchOS)
     MockURLProtocol.requestHandler = { request in
       let response = HTTPURLResponse(
         url: request.url!,
@@ -64,19 +69,20 @@ final class ChatTests: XCTestCase {
     )
     let chat = Chat(model: model, history: [])
     let input = "Test input"
-    let stream = chat.sendMessageStream(input)
+    let stream = try await chat.sendMessageStream(input)
 
     // Ensure the values are parsed correctly
     for try await value in stream {
       XCTAssertNotNil(value.text)
     }
 
-    XCTAssertEqual(chat.history.count, 2)
-    XCTAssertEqual(chat.history[0].parts[0].text, input)
+    let history = await chat.history
+    XCTAssertEqual(history.count, 2)
+    XCTAssertEqual(history[0].parts[0].text, input)
 
     let finalText = "1 2 3 4 5 6 7 8"
     let assembledExpectation = ModelContent(role: "model", parts: finalText)
-    XCTAssertEqual(chat.history[0].parts[0].text, input)
-    XCTAssertEqual(chat.history[1], assembledExpectation)
+    XCTAssertEqual(history[0].parts[0].text, input)
+    XCTAssertEqual(history[1], assembledExpectation)
   }
 }

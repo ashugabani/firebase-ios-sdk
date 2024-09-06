@@ -28,6 +28,8 @@ final class GenerativeModelTests: XCTestCase {
     .init(category: .harassment, probability: .negligible),
     .init(category: .dangerousContent, probability: .negligible),
   ].sorted()
+  let testModelResourceName =
+    "projects/test-project-id/locations/test-location/publishers/google/models/test-model"
 
   var urlSession: URLSession!
   var model: GenerativeModel!
@@ -37,7 +39,7 @@ final class GenerativeModelTests: XCTestCase {
     configuration.protocolClasses = [MockURLProtocol.self]
     urlSession = try XCTUnwrap(URLSession(configuration: configuration))
     model = GenerativeModel(
-      name: "my-model",
+      name: testModelResourceName,
       projectID: "my-project-id",
       apiKey: "API_KEY",
       tools: nil,
@@ -116,17 +118,20 @@ final class GenerativeModelTests: XCTestCase {
     XCTAssertEqual(citationSource1.uri, "https://www.example.com/some-citation-1")
     XCTAssertEqual(citationSource1.startIndex, 0)
     XCTAssertEqual(citationSource1.endIndex, 128)
+    XCTAssertNil(citationSource1.title)
     XCTAssertNil(citationSource1.license)
     let citationSource2 = try XCTUnwrap(citationMetadata.citationSources[1])
-    XCTAssertEqual(citationSource2.uri, "https://www.example.com/some-citation-2")
+    XCTAssertEqual(citationSource2.title, "some-citation-2")
     XCTAssertEqual(citationSource2.startIndex, 130)
     XCTAssertEqual(citationSource2.endIndex, 265)
+    XCTAssertNil(citationSource2.uri)
     XCTAssertNil(citationSource2.license)
     let citationSource3 = try XCTUnwrap(citationMetadata.citationSources[2])
     XCTAssertEqual(citationSource3.uri, "https://www.example.com/some-citation-3")
     XCTAssertEqual(citationSource3.startIndex, 272)
     XCTAssertEqual(citationSource3.endIndex, 431)
     XCTAssertEqual(citationSource3.license, "mit")
+    XCTAssertNil(citationSource3.title)
   }
 
   func testGenerateContent_success_quoteReply() async throws {
@@ -300,7 +305,7 @@ final class GenerativeModelTests: XCTestCase {
   func testGenerateContent_appCheck_validToken() async throws {
     let appCheckToken = "test-valid-token"
     model = GenerativeModel(
-      name: "my-model",
+      name: testModelResourceName,
       projectID: "my-project-id",
       apiKey: "API_KEY",
       tools: nil,
@@ -321,7 +326,7 @@ final class GenerativeModelTests: XCTestCase {
 
   func testGenerateContent_appCheck_tokenRefreshError() async throws {
     model = GenerativeModel(
-      name: "my-model",
+      name: testModelResourceName,
       projectID: "my-project-id",
       apiKey: "API_KEY",
       tools: nil,
@@ -343,7 +348,7 @@ final class GenerativeModelTests: XCTestCase {
   func testGenerateContent_auth_validAuthToken() async throws {
     let authToken = "test-valid-token"
     model = GenerativeModel(
-      name: "my-model",
+      name: testModelResourceName,
       projectID: "my-project-id",
       apiKey: "API_KEY",
       tools: nil,
@@ -364,7 +369,7 @@ final class GenerativeModelTests: XCTestCase {
 
   func testGenerateContent_auth_nilAuthToken() async throws {
     model = GenerativeModel(
-      name: "my-model",
+      name: testModelResourceName,
       projectID: "my-project-id",
       apiKey: "API_KEY",
       tools: nil,
@@ -730,7 +735,7 @@ final class GenerativeModelTests: XCTestCase {
       )
     let requestOptions = RequestOptions(timeout: expectedTimeout)
     model = GenerativeModel(
-      name: "my-model",
+      name: testModelResourceName,
       projectID: "my-project-id",
       apiKey: "API_KEY",
       tools: nil,
@@ -755,7 +760,7 @@ final class GenerativeModelTests: XCTestCase {
       )
 
     do {
-      let stream = model.generateContentStream("Hi")
+      let stream = try await model.generateContentStream("Hi")
       for try await _ in stream {
         XCTFail("No content is there, this shouldn't happen.")
       }
@@ -779,7 +784,7 @@ final class GenerativeModelTests: XCTestCase {
       )
 
     do {
-      let stream = model.generateContentStream(testPrompt)
+      let stream = try await model.generateContentStream(testPrompt)
       for try await _ in stream {
         XCTFail("No content is there, this shouldn't happen.")
       }
@@ -802,7 +807,7 @@ final class GenerativeModelTests: XCTestCase {
       )
 
     do {
-      let stream = model.generateContentStream("Hi")
+      let stream = try await model.generateContentStream("Hi")
       for try await _ in stream {
         XCTFail("No content is there, this shouldn't happen.")
       }
@@ -822,7 +827,7 @@ final class GenerativeModelTests: XCTestCase {
       )
 
     do {
-      let stream = model.generateContentStream("Hi")
+      let stream = try await model.generateContentStream("Hi")
       for try await _ in stream {
         XCTFail("Content shouldn't be shown, this shouldn't happen.")
       }
@@ -842,7 +847,7 @@ final class GenerativeModelTests: XCTestCase {
       )
 
     do {
-      let stream = model.generateContentStream("Hi")
+      let stream = try await model.generateContentStream("Hi")
       for try await _ in stream {
         XCTFail("Content shouldn't be shown, this shouldn't happen.")
       }
@@ -861,7 +866,7 @@ final class GenerativeModelTests: XCTestCase {
         withExtension: "txt"
       )
 
-    let stream = model.generateContentStream("Hi")
+    let stream = try await model.generateContentStream("Hi")
     do {
       for try await content in stream {
         XCTAssertNotNil(content.text)
@@ -882,7 +887,7 @@ final class GenerativeModelTests: XCTestCase {
       )
 
     var responses = 0
-    let stream = model.generateContentStream("Hi")
+    let stream = try await model.generateContentStream("Hi")
     for try await content in stream {
       XCTAssertNotNil(content.text)
       responses += 1
@@ -899,7 +904,7 @@ final class GenerativeModelTests: XCTestCase {
       )
 
     var responses = 0
-    let stream = model.generateContentStream("Hi")
+    let stream = try await model.generateContentStream("Hi")
     for try await content in stream {
       XCTAssertNotNil(content.text)
       responses += 1
@@ -916,7 +921,7 @@ final class GenerativeModelTests: XCTestCase {
       )
 
     var hadUnknown = false
-    let stream = model.generateContentStream("Hi")
+    let stream = try await model.generateContentStream("Hi")
     for try await content in stream {
       XCTAssertNotNil(content.text)
       if let ratings = content.candidates.first?.safetyRatings,
@@ -935,7 +940,7 @@ final class GenerativeModelTests: XCTestCase {
         withExtension: "txt"
       )
 
-    let stream = model.generateContentStream("Hi")
+    let stream = try await model.generateContentStream("Hi")
     var citations = [Citation]()
     var responses = [GenerateContentResponse]()
     for try await content in stream {
@@ -951,19 +956,31 @@ final class GenerativeModelTests: XCTestCase {
     XCTAssertEqual(lastCandidate.finishReason, .stop)
     XCTAssertEqual(citations.count, 6)
     XCTAssertTrue(citations
-      .contains(where: {
-        $0.startIndex == 574 && $0.endIndex == 705 && !$0.uri.isEmpty && $0.license == ""
-      }))
+      .contains {
+        $0.startIndex == 0 && $0.endIndex == 128
+          && $0.uri == "https://www.example.com/some-citation-1" && $0.title == nil
+          && $0.license == nil
+      })
     XCTAssertTrue(citations
-      .contains(where: {
-        $0.startIndex == 899 && $0.endIndex == 1026 && !$0.uri.isEmpty && $0.license == ""
-      }))
+      .contains {
+        $0.startIndex == 130 && $0.endIndex == 265 && $0.uri == nil
+          && $0.title == "some-citation-2" && $0.license == nil
+      })
+    XCTAssertTrue(citations
+      .contains {
+        $0.startIndex == 272 && $0.endIndex == 431
+          && $0.uri == "https://www.example.com/some-citation-3" && $0.title == nil
+          && $0.license == "mit"
+      })
+    XCTAssertFalse(citations.contains { $0.uri?.isEmpty ?? false })
+    XCTAssertFalse(citations.contains { $0.title?.isEmpty ?? false })
+    XCTAssertFalse(citations.contains { $0.license?.isEmpty ?? false })
   }
 
   func testGenerateContentStream_appCheck_validToken() async throws {
     let appCheckToken = "test-valid-token"
     model = GenerativeModel(
-      name: "my-model",
+      name: testModelResourceName,
       projectID: "my-project-id",
       apiKey: "API_KEY",
       tools: nil,
@@ -979,13 +996,13 @@ final class GenerativeModelTests: XCTestCase {
         appCheckToken: appCheckToken
       )
 
-    let stream = model.generateContentStream(testPrompt)
+    let stream = try await model.generateContentStream(testPrompt)
     for try await _ in stream {}
   }
 
   func testGenerateContentStream_appCheck_tokenRefreshError() async throws {
     model = GenerativeModel(
-      name: "my-model",
+      name: testModelResourceName,
       projectID: "my-project-id",
       apiKey: "API_KEY",
       tools: nil,
@@ -1001,7 +1018,7 @@ final class GenerativeModelTests: XCTestCase {
         appCheckToken: AppCheckInteropFake.placeholderTokenValue
       )
 
-    let stream = model.generateContentStream(testPrompt)
+    let stream = try await model.generateContentStream(testPrompt)
     for try await _ in stream {}
   }
 
@@ -1013,7 +1030,7 @@ final class GenerativeModelTests: XCTestCase {
       )
     var responses = [GenerateContentResponse]()
 
-    let stream = model.generateContentStream(testPrompt)
+    let stream = try await model.generateContentStream(testPrompt)
     for try await response in stream {
       responses.append(response)
     }
@@ -1039,7 +1056,7 @@ final class GenerativeModelTests: XCTestCase {
 
     var responseCount = 0
     do {
-      let stream = model.generateContentStream("Hi")
+      let stream = try await model.generateContentStream("Hi")
       for try await content in stream {
         XCTAssertNotNil(content.text)
         responseCount += 1
@@ -1059,7 +1076,7 @@ final class GenerativeModelTests: XCTestCase {
   func testGenerateContentStream_nonHTTPResponse() async throws {
     MockURLProtocol.requestHandler = try nonHTTPRequestHandler()
 
-    let stream = model.generateContentStream("Hi")
+    let stream = try await model.generateContentStream("Hi")
     do {
       for try await content in stream {
         XCTFail("Unexpected content in stream: \(content)")
@@ -1079,7 +1096,7 @@ final class GenerativeModelTests: XCTestCase {
         withExtension: "txt"
       )
 
-    let stream = model.generateContentStream(testPrompt)
+    let stream = try await model.generateContentStream(testPrompt)
     do {
       for try await content in stream {
         XCTFail("Unexpected content in stream: \(content)")
@@ -1103,7 +1120,7 @@ final class GenerativeModelTests: XCTestCase {
         withExtension: "txt"
       )
 
-    let stream = model.generateContentStream(testPrompt)
+    let stream = try await model.generateContentStream(testPrompt)
     do {
       for try await content in stream {
         XCTFail("Unexpected content in stream: \(content)")
@@ -1131,7 +1148,7 @@ final class GenerativeModelTests: XCTestCase {
       )
     let requestOptions = RequestOptions(timeout: expectedTimeout)
     model = GenerativeModel(
-      name: "my-model",
+      name: testModelResourceName,
       projectID: "my-project-id",
       apiKey: "API_KEY",
       tools: nil,
@@ -1142,7 +1159,7 @@ final class GenerativeModelTests: XCTestCase {
     )
 
     var responses = 0
-    let stream = model.generateContentStream(testPrompt)
+    let stream = try await model.generateContentStream(testPrompt)
     for try await content in stream {
       XCTAssertNotNil(content.text)
       responses += 1
@@ -1209,7 +1226,7 @@ final class GenerativeModelTests: XCTestCase {
       )
     let requestOptions = RequestOptions(timeout: expectedTimeout)
     model = GenerativeModel(
-      name: "my-model",
+      name: testModelResourceName,
       projectID: "my-project-id",
       apiKey: "API_KEY",
       tools: nil,
@@ -1224,57 +1241,6 @@ final class GenerativeModelTests: XCTestCase {
     XCTAssertEqual(response.totalTokens, 6)
   }
 
-  // MARK: - Model Resource Name
-
-  func testModelResourceName_noPrefix() async throws {
-    let modelName = "my-model"
-    let modelResourceName = "models/\(modelName)"
-
-    model = GenerativeModel(
-      name: modelName,
-      projectID: "my-project-id",
-      apiKey: "API_KEY",
-      tools: nil,
-      requestOptions: RequestOptions(),
-      appCheck: nil,
-      auth: nil
-    )
-
-    XCTAssertEqual(model.modelResourceName, modelResourceName)
-  }
-
-  func testModelResourceName_modelsPrefix() async throws {
-    let modelResourceName = "models/my-model"
-
-    model = GenerativeModel(
-      name: modelResourceName,
-      projectID: "my-project-id",
-      apiKey: "API_KEY",
-      tools: nil,
-      requestOptions: RequestOptions(),
-      appCheck: nil,
-      auth: nil
-    )
-
-    XCTAssertEqual(model.modelResourceName, modelResourceName)
-  }
-
-  func testModelResourceName_tunedModelsPrefix() async throws {
-    let tunedModelResourceName = "tunedModels/my-model"
-
-    model = GenerativeModel(
-      name: tunedModelResourceName,
-      projectID: "my-project-id",
-      apiKey: "API_KEY",
-      tools: nil,
-      requestOptions: RequestOptions(),
-      appCheck: nil,
-      auth: nil
-    )
-
-    XCTAssertEqual(model.modelResourceName, tunedModelResourceName)
-  }
-
   // MARK: - Helpers
 
   private func nonHTTPRequestHandler() throws -> ((URLRequest) -> (
@@ -1283,9 +1249,9 @@ final class GenerativeModelTests: XCTestCase {
   )) {
     // Skip tests using MockURLProtocol on watchOS; unsupported in watchOS 2 and later, see
     // https://developer.apple.com/documentation/foundation/urlprotocol for details.
-    guard #unavailable(watchOS 2) else {
+    #if os(watchOS)
       throw XCTSkip("Custom URL protocols are unsupported in watchOS 2 and later.")
-    }
+    #endif // os(watchOS)
     return { request in
       // This is *not* an HTTPURLResponse
       let response = URLResponse(
@@ -1309,10 +1275,15 @@ final class GenerativeModelTests: XCTestCase {
   )) {
     // Skip tests using MockURLProtocol on watchOS; unsupported in watchOS 2 and later, see
     // https://developer.apple.com/documentation/foundation/urlprotocol for details.
-    guard #unavailable(watchOS 2) else {
+    #if os(watchOS)
       throw XCTSkip("Custom URL protocols are unsupported in watchOS 2 and later.")
-    }
-    let fileURL = try XCTUnwrap(Bundle.module.url(forResource: name, withExtension: ext))
+    #endif // os(watchOS)
+    #if SWIFT_PACKAGE
+      let bundle = Bundle.module
+    #else // SWIFT_PACKAGE
+      let bundle = Bundle(for: Self.self)
+    #endif // SWIFT_PACKAGE
+    let fileURL = try XCTUnwrap(bundle.url(forResource: name, withExtension: ext))
     return { request in
       let requestURL = try XCTUnwrap(request.url)
       XCTAssertEqual(requestURL.path.occurrenceCount(of: "models/"), 1)

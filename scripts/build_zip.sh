@@ -24,7 +24,7 @@ EOF
   exit 1
 fi
 
-# The release build won't generage Carthage distro if the curreent
+# The release build won't generate Carthage distro if the current
 # PackageManifest version has already been released.
 carthage_version_check="--enable-carthage-version-check"
 
@@ -51,8 +51,8 @@ if [[ "$LINKING_TYPE" == "dynamic" ]]; then
 elif [[ "$LINKING_TYPE" == "static" ]]; then
   linking_mode="--no-dynamic"
 else
-  echo "Defaulting to `dynamic`."
-  linking_mode="--dynamic"
+  echo "Defaulting to `static`."
+  linking_mode="--no-dynamic"
 fi
 
 source_repo=()

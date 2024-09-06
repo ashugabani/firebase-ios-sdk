@@ -49,9 +49,9 @@
     /// token becomes available, or when timeout occurs, whichever happens earlier.
     ///
     /// This function is internal to make visible for tests.
-    func getTokenInternal(callback: @escaping (AuthAPNSToken?, Error?) -> Void) {
+    func getTokenInternal(callback: @escaping (Result<AuthAPNSToken, Error>) -> Void) {
       if let token = tokenStore {
-        callback(token, nil)
+        callback(.success(token))
         return
       }
       if pendingCallbacks.count > 0 {
@@ -68,18 +68,19 @@
       kAuthGlobalWorkQueue.asyncAfter(deadline: deadline) {
         // Only cancel if the pending callbacks remain the same, i.e., not triggered yet.
         if applicableCallbacks.count == self.pendingCallbacks.count {
-          self.callback(withToken: nil, error: nil)
+          self.callback(.failure(AuthErrorUtils.missingAppTokenError(underlyingError: nil)))
         }
       }
     }
 
     func getToken() async throws -> AuthAPNSToken {
       return try await withCheckedThrowingContinuation { continuation in
-        self.getTokenInternal { token, error in
-          if let token {
+        self.getTokenInternal { result in
+          switch result {
+          case let .success(token):
             continuation.resume(returning: token)
-          } else {
-            continuation.resume(throwing: error!)
+          case let .failure(error):
+            continuation.resume(throwing: error)
           }
         }
       }
@@ -105,7 +106,7 @@
           newToken = AuthAPNSToken(withData: setToken.data, type: detectedTokenType)
         }
         tokenStore = newToken
-        callback(withToken: newToken, error: nil)
+        callback(.success(newToken))
       }
     }
 
@@ -115,18 +116,18 @@
     /// Cancels any pending `getTokenWithCallback:` request.
     /// - Parameter error: The error to return .
     func cancel(withError error: Error) {
-      callback(withToken: nil, error: error)
+      callback(.failure(error))
     }
 
     /// Enable unit test faking.
     var application: AuthAPNSTokenApplication
-    private var pendingCallbacks: [(AuthAPNSToken?, Error?) -> Void] = []
+    private var pendingCallbacks: [(Result<AuthAPNSToken, Error>) -> Void] = []
 
-    private func callback(withToken token: AuthAPNSToken?, error: Error?) {
+    private func callback(_ result: Result<AuthAPNSToken, Error>) {
       let pendingCallbacks = self.pendingCallbacks
       self.pendingCallbacks = []
       for callback in pendingCallbacks {
-        callback(token, error)
+        callback(result)
       }
     }
 
@@ -142,18 +143,11 @@
       }
 
       // TODO: resolve https://github.com/firebase/firebase-ios-sdk/issues/10921
-      if Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt" {
-        // Distributed via TestFlight
-        return defaultAppTypeProd
-      }
+      // to support TestFlight
 
-      let path = Bundle.main.bundlePath + "embedded.mobileprovision"
-      guard let url = URL(string: path) else {
-        AuthLog.logInfo(code: "I-AUT000007", message: "\(path) does not exist")
-        return defaultAppTypeProd
-      }
+      let path = Bundle.main.bundlePath + "/" + "embedded.mobileprovision"
       do {
-        let profileData = try Data(contentsOf: url)
+        let profileData = try NSData(contentsOfFile: path) as Data
 
         // The "embedded.mobileprovision" sometimes contains characters with value 0, which signals
         // the end of a c-string and halts the ASCII parser, or with value > 127, which violates
@@ -176,7 +170,7 @@
 
         let scanner = Scanner(string: embeddedProfile)
         if scanner.scanUpToString("<plist") != nil {
-          guard let plistContents = scanner.scanUpToString("</plist>"),
+          guard let plistContents = scanner.scanUpToString("</plist>")?.appending("</plist>"),
                 let data = plistContents.data(using: .utf8) else {
             return defaultAppTypeProd
           }
@@ -193,7 +187,8 @@
                               message: "Provisioning profile has specifically provisioned devices, " +
                                 "most likely a Dev profile.")
             }
-            guard let apsEnvironment = plistMap["Entitlements.aps-environment"] as? String else {
+            guard let entitlements = plistMap["Entitlements"] as? [String: Any],
+                  let apsEnvironment = entitlements["aps-environment"] as? String else {
               AuthLog.logInfo(code: "I-AUT000013",
                               message: "No aps-environment set. If testing on a device APNS is not " +
                                 "correctly configured. Please recheck your provisioning profiles.")

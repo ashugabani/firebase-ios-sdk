@@ -30,7 +30,7 @@ jobs:
   package-release:
     # Don't run on private repo.
     if: (github.repository == 'Firebase/firebase-ios-sdk' && github.event_name == 'schedule') || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: macos-14
+    runs-on: macos-13
     steps:
     - uses: actions/checkout@v4
     - uses: mikehardy/buildcache-action@c87cea0ccd718971d6cc39e672c4f26815b6c126
@@ -47,7 +47,7 @@ jobs:
          sh -x scripts/build_zip.sh release_zip_dir \
            "${{ github.event.inputs.custom_spec_repos || 'https://github.com/firebase/SpecsStaging.git' }}" \
            build-release \
-           dynamic
+           static
     - uses: actions/upload-artifact@v4
       with:
         name: Firebase-release-zip-zip
@@ -58,7 +58,7 @@ jobs:
   build:
     # Don't run on private repo unless it is a PR.
     if: (github.repository == 'Firebase/firebase-ios-sdk' && github.event_name == 'schedule') || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: macos-14
+    runs-on: macos-13
     steps:
     - uses: actions/checkout@v4
     - name: Xcode 15.2
@@ -75,7 +75,7 @@ jobs:
     strategy:
       matrix:
         linking_type: [static, dynamic]
-    runs-on: macos-14
+    runs-on: macos-13
     steps:
     - uses: actions/checkout@v4
     - uses: mikehardy/buildcache-action@c87cea0ccd718971d6cc39e672c4f26815b6c126
@@ -94,8 +94,9 @@ jobs:
            build-head \
            ${{ matrix.linking_type }}
     - uses: actions/upload-artifact@v4
+      if: ${{ always() }}
       with:
-        name: ${{ matrix.linking_type == 'dynamic' && 'Firebase-actions-dir' || 'Firebase-actions-dir-static' }}
+        name: ${{ matrix.linking_type == 'static' && 'Firebase-actions-dir' || 'Firebase-actions-dir-dynamic' }}
         # Zip the entire output directory since the builder adds subdirectories we don't know the
         # name of.
         path: zip_output_dir
@@ -111,7 +112,7 @@ jobs:
     strategy:
       matrix:
         os: [macos-13, macos-14]
-        artifact: [Firebase-actions-dir, Firebase-actions-dir-static]
+        artifact: [Firebase-actions-dir, Firebase-actions-dir-dynamic]
         include:
           - os: macos-13
             xcode: Xcode_15.2
@@ -121,7 +122,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Get framework dir
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v4.1.7
       with:
         name: ${{ matrix.artifact }}
     - uses: ruby/setup-ruby@v1
@@ -173,7 +174,7 @@ jobs:
     strategy:
       matrix:
         os: [macos-13, macos-14]
-        artifact: [Firebase-actions-dir, Firebase-actions-dir-static]
+        artifact: [Firebase-actions-dir, Firebase-actions-dir-dynamic]
         include:
           - os: macos-13
             xcode: Xcode_15.2
@@ -183,7 +184,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Get framework dir
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v4.1.7
       with:
         name: ${{ matrix.artifact }}
     - uses: ruby/setup-ruby@v1
@@ -227,7 +228,7 @@ jobs:
     strategy:
       matrix:
         os: [macos-13, macos-14]
-        artifact: [Firebase-actions-dir, Firebase-actions-dir-static]
+        artifact: [Firebase-actions-dir, Firebase-actions-dir-dynamic]
         include:
           - os: macos-13
             xcode: Xcode_15.2
@@ -237,7 +238,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Get framework dir
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v4.1.7
       with:
         name: ${{ matrix.artifact }}
     - uses: ruby/setup-ruby@v1
@@ -279,7 +280,7 @@ jobs:
     strategy:
       matrix:
         os: [macos-13, macos-14]
-        artifact: [Firebase-actions-dir, Firebase-actions-dir-static]
+        artifact: [Firebase-actions-dir, Firebase-actions-dir-dynamic]
         include:
           - os: macos-13
             xcode: Xcode_15.2
@@ -289,7 +290,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Get framework dir
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v4.1.7
       with:
         name: ${{ matrix.artifact }}
     - uses: ruby/setup-ruby@v1
@@ -355,12 +356,12 @@ jobs:
       matrix:
         os: [macos-13]
         xcode: [Xcode_15.2]
-        artifact: [Firebase-actions-dir, Firebase-actions-dir-static]
+        artifact: [Firebase-actions-dir, Firebase-actions-dir-dynamic]
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v4
     - name: Get framework dir
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v4.1.7
       with:
         name: ${{ matrix.artifact }}
     - uses: ruby/setup-ruby@v1
@@ -406,7 +407,7 @@ jobs:
     strategy:
       matrix:
         os: [macos-13, macos-14]
-        artifact: [Firebase-actions-dir, Firebase-actions-dir-static]
+        artifact: [Firebase-actions-dir, Firebase-actions-dir-dynamic]
         include:
           - os: macos-13
             xcode: Xcode_15.2
@@ -416,7 +417,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Get framework dir
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v4.1.7
       with:
         name: ${{ matrix.artifact }}
     - uses: ruby/setup-ruby@v1
@@ -466,7 +467,7 @@ jobs:
     strategy:
       matrix:
         os: [macos-13, macos-14]
-        artifact: [Firebase-actions-dir, Firebase-actions-dir-static]
+        artifact: [Firebase-actions-dir, Firebase-actions-dir-dynamic]
         include:
           - os: macos-13
             xcode: Xcode_15.2
@@ -476,7 +477,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Get framework dir
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v4.1.7
       with:
         name: ${{ matrix.artifact }}
     - uses: ruby/setup-ruby@v1
@@ -521,7 +522,7 @@ jobs:
         run: sudo xcode-select -s /Applications/Xcode_15.2.app/Contents/Developer
       - uses: actions/checkout@v4
       - name: Get framework dir
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.7
         with:
           name: Firebase-actions-dir
       - uses: ruby/setup-ruby@v1
@@ -551,7 +552,7 @@ jobs:
     strategy:
       matrix:
         os: [macos-13, macos-14]
-        artifact: [Firebase-actions-dir, Firebase-actions-dir-static]
+        artifact: [Firebase-actions-dir, Firebase-actions-dir-dynamic]
         include:
           - os: macos-13
             xcode: Xcode_15.2
@@ -561,7 +562,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Get framework dir
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v4.1.7
       with:
         name: ${{ matrix.artifact }}
     - uses: ruby/setup-ruby@v1
@@ -608,7 +609,7 @@ jobs:
     strategy:
       matrix:
         os: [macos-13, macos-14]
-        artifact: [Firebase-actions-dir, Firebase-actions-dir-static]
+        artifact: [Firebase-actions-dir, Firebase-actions-dir-dynamic]
         include:
           - os: macos-13
             xcode: Xcode_15.2
@@ -618,7 +619,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Get framework dir
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v4.1.7
       with:
         name: ${{ matrix.artifact }}
     - uses: ruby/setup-ruby@v1
@@ -664,7 +665,7 @@ jobs:
     strategy:
       matrix:
         os: [macos-13, macos-14]
-        artifact: [Firebase-actions-dir, Firebase-actions-dir-static]
+        artifact: [Firebase-actions-dir, Firebase-actions-dir-dynamic]
         include:
           - os: macos-13
             xcode: Xcode_15.2
@@ -674,7 +675,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Get framework dir
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v4.1.7
       with:
         name: ${{ matrix.artifact }}
     - uses: ruby/setup-ruby@v1

@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import Foundation
-
-/// Enumeration of the available Auth Provider IDs.
-public enum AuthProviderID: String {
-  case apple = "apple.com"
-  case email = "password"
-  case facebook = "facebook.com"
-  case gameCenter = "gc.apple.com"
-  case gitHub = "github.com"
-  case google = "google.com"
-  case phone
-}
+#import <FirebaseFirestoreInternal/FIRVectorValue.h>

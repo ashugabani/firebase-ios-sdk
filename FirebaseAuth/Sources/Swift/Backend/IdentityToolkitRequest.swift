@@ -19,7 +19,9 @@ private let kHttpProtocol = "http:"
 
 private let kEmulatorHostAndPrefixFormat = "%@/%@"
 
-private var gAPIHost = "www.googleapis.com"
+/// Host for server API calls. This should be changed via
+/// `IdentityToolkitRequest.setHost(_ host:)` for testing purposes only.
+private nonisolated(unsafe) var gAPIHost = "www.googleapis.com"
 
 private let kFirebaseAuthAPIHost = "www.googleapis.com"
 private let kIdentityPlatformAPIHost = "identitytoolkit.googleapis.com"
@@ -61,8 +63,6 @@ class IdentityToolkitRequest {
     clientType = "CLIENT_TYPE_IOS"
     tenantID = requestConfiguration.auth?.tenantID
   }
-
-  var containsPostBody: Bool { return true }
 
   func queryParams() -> String {
     return ""

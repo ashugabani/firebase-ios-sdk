@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import FirebaseAuth
+import SwiftUI
 import UIKit
 
 // MARK: - Extending a `Firebase User` to conform to `DataSourceProvidable`
@@ -77,7 +78,7 @@ public extension UIViewController {
     }
   }
 
-  func displayError(_ error: (any Error)?, from function: StaticString = #function) {
+  @MainActor func displayError(_ error: (any Error)?, from function: StaticString = #function) {
     guard let error = error else { return }
     print("ⓧ Error in \(function): \(error.localizedDescription)")
     let message = "\(error.localizedDescription)\n\n Occurred in \(function)"

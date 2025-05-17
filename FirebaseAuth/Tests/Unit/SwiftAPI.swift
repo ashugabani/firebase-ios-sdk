@@ -41,7 +41,10 @@ class AuthAPI_hOnlyTests: XCTestCase {
        let _: String = codeSettings.iOSBundleID,
        let _: String = codeSettings.androidPackageName,
        let _: String = codeSettings.androidMinimumVersion,
-       let _: String = codeSettings.dynamicLinkDomain {}
+       let _: String = codeSettings.dynamicLinkDomain,
+       let _: String = codeSettings.linkDomain {}
+    codeSettings.linkDomain = nil
+    codeSettings.linkDomain = ""
   }
 
   @available(iOS 13, tvOS 13, macOS 10.15, macCatalyst 13, watchOS 7, *)
@@ -276,6 +279,7 @@ class AuthAPI_hOnlyTests: XCTestCase {
     _ = AuthErrorCode.tenantIDMismatch
     _ = AuthErrorCode.unsupportedTenantOperation
     _ = AuthErrorCode.invalidDynamicLinkDomain
+    _ = AuthErrorCode.invalidHostingLinkDomain
     _ = AuthErrorCode.rejectedCredential
     _ = AuthErrorCode.gameKitNotLinked
     _ = AuthErrorCode.secondFactorRequired
@@ -353,7 +357,7 @@ class AuthAPI_hOnlyTests: XCTestCase {
         }
       }
       let obj = FederatedAuthImplementation()
-      try await _ = obj.credential(with: nil)
+      _ = try await obj.credential(with: nil)
     }
 
     func FIRFederatedAuthProvider_h() {
@@ -365,7 +369,7 @@ class AuthAPI_hOnlyTests: XCTestCase {
       @available(iOS 13, tvOS 13, macOS 10.15, macCatalyst 13, watchOS 7, *)
       func FIRFedederatedAuthProvider_hAsync() async throws {
         let obj = FederatedAuthImplementation()
-        try await _ = obj.credential(with: nil)
+        _ = try await obj.credential(with: nil)
       }
     }
   #endif

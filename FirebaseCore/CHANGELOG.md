@@ -1,3 +1,27 @@
+# Firebase 11.12.0
+- [changed] Firebase now requires at least Xcode 16.2. See
+  https://developer.apple.com/news/?id=9s0rgdy9 for more info.
+
+# Firebase 11.8.0
+- [deprecated] The zip and Carthage distributions of the Google Mobile Ads SDK
+  with Firebase are deprecated and will be removed in the next major release.
+  Instead, the Google Mobile Ads SDK binary distribution should be accessed
+  from https://developers.google.com/admob/ios/download. Note that
+  _any existing versions of the Firebase zip or Carthage distributions will
+  continue to be available and functional_. Learn more about this change
+  in our FAQ: https://firebase.google.com/support/faq/#admob-which-sdk. (#14408)
+
+# Firebase 11.4.2
+- [fixed] CocoaPods only release to fix iOS 12 build failure resulting from
+  incomplete implementation in the FirebaseCoreInternal CocoaPod.
+
+# Firebase 11.4.1
+- [fixed] CocoaPods only release to revert breaking change in
+  `FirebaseCoreExtension` SDK. (#13942)
+
+# Firebase 11.4.0
+- [fixed] Fixed issue building documentation with some Firebase products. (#13756)
+
 # Firebase 11.0.0
 - [changed] **Breaking change**: Firebase's minimum supported versions have
   updated for the following platforms:

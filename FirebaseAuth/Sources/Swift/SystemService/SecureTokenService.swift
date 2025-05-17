@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import Foundation
+import FirebaseCoreInternal
 
 private let kFiveMinutes = 5 * 60.0
 
@@ -25,12 +25,13 @@ actor SecureTokenServiceInternal {
   /// - Parameter forceRefresh: Forces the token to be refreshed.
   /// - Returns : A tuple with the token and flag of whether it was updated.
   func fetchAccessToken(forcingRefresh forceRefresh: Bool,
-                        service: SecureTokenService) async throws -> (String?, Bool) {
+                        service: SecureTokenService,
+                        backend: AuthBackend) async throws -> (String?, Bool) {
     if !forceRefresh, hasValidAccessToken(service: service) {
       return (service.accessToken, false)
     } else {
       AuthLog.logDebug(code: "I-AUT000017", message: "Fetching new token from backend.")
-      return try await requestAccessToken(retryIfExpired: true, service: service)
+      return try await requestAccessToken(retryIfExpired: true, service: service, backend: backend)
     }
   }
 
@@ -41,7 +42,8 @@ actor SecureTokenServiceInternal {
   ///
   /// - Returns: Token and Bool indicating if update occurred.
   private func requestAccessToken(retryIfExpired: Bool,
-                                  service: SecureTokenService) async throws -> (String?, Bool) {
+                                  service: SecureTokenService,
+                                  backend: AuthBackend) async throws -> (String?, Bool) {
     // TODO: This was a crash in ObjC SDK, should it callback with an error?
     guard let refreshToken = service.refreshToken,
           let requestConfiguration = service.requestConfiguration else {
@@ -50,7 +52,7 @@ actor SecureTokenServiceInternal {
 
     let request = SecureTokenRequest.refreshRequest(refreshToken: refreshToken,
                                                     requestConfiguration: requestConfiguration)
-    let response = try await AuthBackend.call(with: request)
+    let response = try await backend.call(with: request)
     var tokenUpdated = false
     if let newAccessToken = response.accessToken,
        newAccessToken.count > 0,
@@ -67,7 +69,11 @@ actor SecureTokenServiceInternal {
           if expirationDate.timeIntervalSinceNow <= kFiveMinutes {
             // We only retry once, to avoid an infinite loop in the case that an end-user has
             // their local time skewed by over an hour.
-            return try await requestAccessToken(retryIfExpired: false, service: service)
+            return try await requestAccessToken(
+              retryIfExpired: false,
+              service: service,
+              backend: backend
+            )
           }
         }
       }
@@ -108,27 +114,50 @@ actor SecureTokenServiceInternal {
 /// A class represents a credential that proves the identity of the app.
 @available(iOS 13, tvOS 13, macOS 10.15, macCatalyst 13, watchOS 7, *)
 @objc(FIRSecureTokenService) // objc Needed for decoding old versions
-class SecureTokenService: NSObject, NSSecureCoding {
+final class SecureTokenService: NSObject, NSSecureCoding, Sendable {
   /// Internal actor to enforce serialization
   private let internalService: SecureTokenServiceInternal
 
   /// The configuration for making requests to server.
-  var requestConfiguration: AuthRequestConfiguration?
+  var requestConfiguration: AuthRequestConfiguration? {
+    get { _requestConfiguration.withLock { $0 } }
+    set { _requestConfiguration.withLock { $0 = newValue } }
+  }
+
+  let _requestConfiguration: FIRAllocatedUnfairLock<AuthRequestConfiguration?>
 
   /// The cached access token.
   ///
-  ///  This method is specifically for providing the access token to internal clients during
+  /// This method is specifically for providing the access token to internal clients during
   /// deserialization and sign-in events, and should not be used to retrieve the access token by
-  ///     anyone else.
-  var accessToken: String
+  /// anyone else.
+  ///
+  /// - Note: The atomic wrapper can be removed when the SDK is fully
+  /// synchronized with structured concurrency.
+  var accessToken: String {
+    get { _accessToken.withLock { $0 } }
+    set { _accessToken.withLock { $0 = newValue } }
+  }
+
+  private let _accessToken: FIRAllocatedUnfairLock<String>
 
   /// The refresh token for the user, or `nil` if the user has yet completed sign-in flow.
   ///
   /// This property needs to be set manually after the instance is decoded from archive.
-  var refreshToken: String?
+  var refreshToken: String? {
+    get { _refreshToken.withLock { $0 } }
+    set { _refreshToken.withLock { $0 = newValue } }
+  }
+
+  private let _refreshToken: FIRAllocatedUnfairLock<String?>
 
   /// The expiration date of the cached access token.
-  var accessTokenExpirationDate: Date?
+  var accessTokenExpirationDate: Date? {
+    get { _accessTokenExpirationDate.withLock { $0 } }
+    set { _accessTokenExpirationDate.withLock { $0 = newValue } }
+  }
+
+  private let _accessTokenExpirationDate: FIRAllocatedUnfairLock<Date?>
 
   /// Creates a `SecureTokenService` with access and refresh tokens.
   /// - Parameter requestConfiguration: The configuration for making requests to server.
@@ -140,10 +169,10 @@ class SecureTokenService: NSObject, NSSecureCoding {
        accessTokenExpirationDate: Date?,
        refreshToken: String) {
     internalService = SecureTokenServiceInternal()
-    self.requestConfiguration = requestConfiguration
-    self.accessToken = accessToken
-    self.accessTokenExpirationDate = accessTokenExpirationDate
-    self.refreshToken = refreshToken
+    _requestConfiguration = FIRAllocatedUnfairLock(initialState: requestConfiguration)
+    _accessToken = FIRAllocatedUnfairLock(initialState: accessToken)
+    _accessTokenExpirationDate = FIRAllocatedUnfairLock(initialState: accessTokenExpirationDate)
+    _refreshToken = FIRAllocatedUnfairLock(initialState: refreshToken)
   }
 
   /// Fetch a fresh ephemeral access token for the ID associated with this instance. The token
@@ -152,8 +181,10 @@ class SecureTokenService: NSObject, NSSecureCoding {
   ///    Invoked asynchronously on the auth global work queue in the future.
   /// - Parameter forceRefresh: Forces the token to be refreshed.
   /// - Returns : A tuple with the token and flag of whether it was updated.
-  func fetchAccessToken(forcingRefresh forceRefresh: Bool) async throws -> (String?, Bool) {
-    return try await internalService.fetchAccessToken(forcingRefresh: forceRefresh, service: self)
+  func fetchAccessToken(forcingRefresh forceRefresh: Bool,
+                        backend: AuthBackend) async throws -> (String?, Bool) {
+    return try await internalService
+      .fetchAccessToken(forcingRefresh: forceRefresh, service: self, backend: backend)
   }
 
   // MARK: NSSecureCoding
@@ -164,9 +195,7 @@ class SecureTokenService: NSObject, NSSecureCoding {
   private static let kAccessTokenKey = "accessToken"
   private static let kAccessTokenExpirationDateKey = "accessTokenExpirationDate"
 
-  static var supportsSecureCoding: Bool {
-    true
-  }
+  static let supportsSecureCoding = true
 
   required convenience init?(coder: NSCoder) {
     guard let refreshToken = coder.decodeObject(of: [NSString.self],

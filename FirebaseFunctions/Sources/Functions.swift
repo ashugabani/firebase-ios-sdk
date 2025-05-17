@@ -19,13 +19,42 @@ import FirebaseMessagingInterop
 import FirebaseSharedSwift
 import Foundation
 #if COCOAPODS
-  import GTMSessionFetcher
+  @preconcurrency import GTMSessionFetcher
 #else
-  import GTMSessionFetcherCore
+  @preconcurrency import GTMSessionFetcherCore
 #endif
 
-// Avoids exposing internal FirebaseCore APIs to Swift users.
-@_implementationOnly import FirebaseCoreExtension
+internal import FirebaseCoreExtension
+
+final class AtomicBox<T>: Sendable {
+  private nonisolated(unsafe) var _value: T
+  private let lock = NSLock()
+
+  public init(_ value: T) where T: Sendable {
+    _value = value
+  }
+
+  public func value() -> T {
+    lock.withLock {
+      _value
+    }
+  }
+
+  @discardableResult
+  public func withLock(_ mutatingBody: (_ value: inout T) -> Void) -> T {
+    lock.withLock {
+      mutatingBody(&_value)
+      return _value
+    }
+  }
+
+  @discardableResult
+  public func withLock<R>(_ mutatingBody: (_ value: inout T) throws -> R) rethrows -> R {
+    try lock.withLock {
+      try mutatingBody(&_value)
+    }
+  }
+}
 
 /// File specific constants.
 private enum Constants {
@@ -39,7 +68,7 @@ enum FunctionsConstants {
 }
 
 /// `Functions` is the client for Cloud Functions for a Firebase project.
-@objc(FIRFunctions) open class Functions: NSObject {
+@objc(FIRFunctions) open class Functions: NSObject, @unchecked Sendable {
   // MARK: - Private Variables
 
   /// The network client to use for http requests.
@@ -53,10 +82,8 @@ enum FunctionsConstants {
 
   /// A map of active instances, grouped by app. Keys are FirebaseApp names and values are arrays
   /// containing all instances of Functions associated with the given app.
-  private static var instances: [String: [Functions]] = [:]
-
-  /// Lock to manage access to the instances array to avoid race conditions.
-  private static var instancesLock: os_unfair_lock = .init()
+  private static let instances: AtomicBox<[String: [Functions]]> =
+    AtomicBox([:])
 
   /// The custom domain to use for all functions references (optional).
   let customDomain: String?
@@ -64,10 +91,14 @@ enum FunctionsConstants {
   /// The region to use for all function references.
   let region: String
 
+  private let _emulatorOrigin: AtomicBox<String?>
+
   // MARK: - Public APIs
 
   /// The current emulator origin, or `nil` if it is not set.
-  open private(set) var emulatorOrigin: String?
+  open var emulatorOrigin: String? {
+    _emulatorOrigin.value()
+  }
 
   /// Creates a Cloud Functions client using the default or returns a pre-existing instance if it
   /// already exists.
@@ -135,7 +166,7 @@ enum FunctionsConstants {
   /// - Parameter name: The name of the Callable HTTPS trigger.
   /// - Returns: A reference to a Callable HTTPS trigger.
   @objc(HTTPSCallableWithName:) open func httpsCallable(_ name: String) -> HTTPSCallable {
-    return HTTPSCallable(functions: self, name: name)
+    HTTPSCallable(functions: self, url: functionURL(for: name)!)
   }
 
   /// Creates a reference to the Callable HTTPS trigger with the given name and configuration
@@ -147,7 +178,7 @@ enum FunctionsConstants {
   @objc(HTTPSCallableWithName:options:) public func httpsCallable(_ name: String,
                                                                   options: HTTPSCallableOptions)
     -> HTTPSCallable {
-    return HTTPSCallable(functions: self, name: name, options: options)
+    HTTPSCallable(functions: self, url: functionURL(for: name)!, options: options)
   }
 
   /// Creates a reference to the Callable HTTPS trigger with the given name.
@@ -291,7 +322,9 @@ enum FunctionsConstants {
   @objc open func useEmulator(withHost host: String, port: Int) {
     let prefix = host.hasPrefix("http") ? "" : "http://"
     let origin = String(format: "\(prefix)\(host):%li", port)
-    emulatorOrigin = origin
+    _emulatorOrigin.withLock { emulatorOrigin in
+      emulatorOrigin = origin
+    }
   }
 
   // MARK: - Private Funcs (or Internal for tests)
@@ -304,30 +337,28 @@ enum FunctionsConstants {
     guard let app else {
       fatalError("`FirebaseApp.configure()` needs to be called before using Functions.")
     }
-    os_unfair_lock_lock(&instancesLock)
 
-    // Unlock before the function returns.
-    defer { os_unfair_lock_unlock(&instancesLock) }
-
-    if let associatedInstances = instances[app.name] {
-      for instance in associatedInstances {
-        // Domains may be nil, so handle with care.
-        var equalDomains = false
-        if let instanceCustomDomain = instance.customDomain {
-          equalDomains = instanceCustomDomain == customDomain
-        } else {
-          equalDomains = customDomain == nil
-        }
-        // Check if it's a match.
-        if instance.region == region, equalDomains {
-          return instance
+    return instances.withLock { instances in
+      if let associatedInstances = instances[app.name] {
+        for instance in associatedInstances {
+          // Domains may be nil, so handle with care.
+          var equalDomains = false
+          if let instanceCustomDomain = instance.customDomain {
+            equalDomains = instanceCustomDomain == customDomain
+          } else {
+            equalDomains = customDomain == nil
+          }
+          // Check if it's a match.
+          if instance.region == region, equalDomains {
+            return instance
+          }
         }
       }
+      let newInstance = Functions(app: app, region: region, customDomain: customDomain)
+      let existingInstances = instances[app.name, default: []]
+      instances[app.name] = existingInstances + [newInstance]
+      return newInstance
     }
-    let newInstance = Functions(app: app, region: region, customDomain: customDomain)
-    let existingInstances = instances[app.name, default: []]
-    instances[app.name] = existingInstances + [newInstance]
-    return newInstance
   }
 
   @objc init(projectID: String,
@@ -340,7 +371,7 @@ enum FunctionsConstants {
     self.projectID = projectID
     self.region = region
     self.customDomain = customDomain
-    emulatorOrigin = nil
+    _emulatorOrigin = AtomicBox(nil)
     contextProvider = FunctionsContextProvider(auth: auth,
                                                messaging: messaging,
                                                appCheck: appCheck)
@@ -369,56 +400,57 @@ enum FunctionsConstants {
               appCheck: appCheck)
   }
 
-  func urlWithName(_ name: String) -> String {
+  func functionURL(for name: String) -> URL? {
     assert(!name.isEmpty, "Name cannot be empty")
 
     // Check if we're using the emulator
     if let emulatorOrigin {
-      return "\(emulatorOrigin)/\(projectID)/\(region)/\(name)"
+      return URL(string: "\(emulatorOrigin)/\(projectID)/\(region)/\(name)")
     }
 
     // Check the custom domain.
     if let customDomain {
-      return "\(customDomain)/\(name)"
+      return URL(string: "\(customDomain)/\(name)")
     }
 
-    return "https://\(region)-\(projectID).cloudfunctions.net/\(name)"
+    return URL(string: "https://\(region)-\(projectID).cloudfunctions.net/\(name)")
   }
 
-  func callFunction(name: String,
+  @available(iOS 13, macCatalyst 13, macOS 10.15, tvOS 13, watchOS 7, *)
+  func callFunction(at url: URL,
+                    withObject data: Any?,
+                    options: HTTPSCallableOptions?,
+                    timeout: TimeInterval) async throws -> sending HTTPSCallableResult {
+    let context = try await contextProvider.context(options: options)
+    let fetcher = try makeFetcher(
+      url: url,
+      data: data,
+      options: options,
+      timeout: timeout,
+      context: context
+    )
+
+    do {
+      let rawData = try await fetcher.beginFetch()
+      return try callableResult(fromResponseData: rawData, endpointURL: url)
+    } catch {
+      throw processedError(fromResponseError: error, endpointURL: url)
+    }
+  }
+
+  func callFunction(at url: URL,
                     withObject data: Any?,
                     options: HTTPSCallableOptions?,
                     timeout: TimeInterval,
-                    completion: @escaping ((Result<HTTPSCallableResult, Error>) -> Void)) {
+                    completion: @escaping @MainActor (Result<HTTPSCallableResult, Error>) -> Void) {
     // Get context first.
     contextProvider.getContext(options: options) { context, error in
       // Note: context is always non-nil since some checks could succeed, we're only failing if
       // there's an error.
       if let error {
-        completion(.failure(error))
-      } else {
-        let url = self.urlWithName(name)
-        self.callFunction(url: URL(string: url)!,
-                          withObject: data,
-                          options: options,
-                          timeout: timeout,
-                          context: context,
-                          completion: completion)
-      }
-    }
-  }
-
-  func callFunction(url: URL,
-                    withObject data: Any?,
-                    options: HTTPSCallableOptions?,
-                    timeout: TimeInterval,
-                    completion: @escaping ((Result<HTTPSCallableResult, Error>) -> Void)) {
-    // Get context first.
-    contextProvider.getContext(options: options) { context, error in
-      // Note: context is always non-nil since some checks could succeed, we're only failing if
-      // there's an error.
-      if let error {
-        completion(.failure(error))
+        DispatchQueue.main.async {
+          completion(.failure(error))
+        }
       } else {
         self.callFunction(url: url,
                           withObject: data,
@@ -435,24 +467,256 @@ enum FunctionsConstants {
                             options: HTTPSCallableOptions?,
                             timeout: TimeInterval,
                             context: FunctionsContext,
-                            completion: @escaping ((Result<HTTPSCallableResult, Error>) -> Void)) {
-    let request = URLRequest(url: url,
-                             cachePolicy: .useProtocolCachePolicy,
-                             timeoutInterval: timeout)
-    let fetcher = fetcherService.fetcher(with: request)
-
+                            completion: @escaping @MainActor (Result<HTTPSCallableResult, Error>)
+                              -> Void) {
+    let fetcher: GTMSessionFetcher
     do {
-      let data = data ?? NSNull()
-      let encoded = try serializer.encode(data)
-      let body = ["data": encoded]
-      let payload = try JSONSerialization.data(withJSONObject: body)
-      fetcher.bodyData = payload
+      fetcher = try makeFetcher(
+        url: url,
+        data: data,
+        options: options,
+        timeout: timeout,
+        context: context
+      )
     } catch {
       DispatchQueue.main.async {
         completion(.failure(error))
       }
       return
     }
+
+    fetcher.beginFetch { [self] data, error in
+      let result: Result<HTTPSCallableResult, any Error>
+      if let error {
+        result = .failure(processedError(fromResponseError: error, endpointURL: url))
+      } else if let data {
+        do {
+          result = try .success(callableResult(fromResponseData: data, endpointURL: url))
+        } catch {
+          result = .failure(error)
+        }
+      } else {
+        result = .failure(FunctionsError(.internal))
+      }
+
+      DispatchQueue.main.async {
+        completion(result)
+      }
+    }
+  }
+
+  @available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, *)
+  func stream(at url: URL,
+              data: SendableWrapper?,
+              options: HTTPSCallableOptions?,
+              timeout: TimeInterval)
+    -> AsyncThrowingStream<JSONStreamResponse, Error> {
+    AsyncThrowingStream { continuation in
+      Task {
+        let urlRequest: URLRequest
+        do {
+          let context = try await contextProvider.context(options: options)
+          urlRequest = try makeRequestForStreamableContent(
+            url: url,
+            data: data?.value,
+            options: options,
+            timeout: timeout,
+            context: context
+          )
+        } catch {
+          continuation.finish(throwing: FunctionsError(
+            .invalidArgument,
+            userInfo: [NSUnderlyingErrorKey: error]
+          ))
+          return
+        }
+
+        let stream: URLSession.AsyncBytes
+        let rawResponse: URLResponse
+        do {
+          (stream, rawResponse) = try await URLSession.shared.bytes(for: urlRequest)
+        } catch {
+          continuation.finish(throwing: FunctionsError(
+            .unavailable,
+            userInfo: [NSUnderlyingErrorKey: error]
+          ))
+          return
+        }
+
+        // Verify the status code is an HTTP response.
+        guard let response = rawResponse as? HTTPURLResponse else {
+          continuation.finish(
+            throwing: FunctionsError(
+              .unavailable,
+              userInfo: [NSLocalizedDescriptionKey: "Response was not an HTTP response."]
+            )
+          )
+          return
+        }
+
+        // Verify the status code is a 200.
+        guard response.statusCode == 200 else {
+          continuation.finish(
+            throwing: FunctionsError(
+              httpStatusCode: response.statusCode,
+              region: region,
+              url: url,
+              body: nil,
+              serializer: serializer
+            )
+          )
+          return
+        }
+
+        do {
+          for try await line in stream.lines {
+            guard line.hasPrefix("data:") else {
+              continuation.finish(
+                throwing: FunctionsError(
+                  .dataLoss,
+                  userInfo: [NSLocalizedDescriptionKey: "Unexpected format for streamed response."]
+                )
+              )
+              return
+            }
+
+            do {
+              // We can assume 5 characters since it's utf-8 encoded, removing `data:`.
+              let jsonText = String(line.dropFirst(5))
+              let data = try jsonData(jsonText: jsonText)
+              // Handle the content and parse it.
+              let content = try callableStreamResult(fromResponseData: data, endpointURL: url)
+              continuation.yield(content)
+            } catch {
+              continuation.finish(throwing: error)
+              return
+            }
+          }
+        } catch {
+          continuation.finish(
+            throwing: FunctionsError(
+              .dataLoss,
+              userInfo: [
+                NSLocalizedDescriptionKey: "Unexpected format for streamed response.",
+                NSUnderlyingErrorKey: error,
+              ]
+            )
+          )
+          return
+        }
+
+        continuation.finish()
+      }
+    }
+  }
+
+  @available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, *)
+  private func callableStreamResult(fromResponseData data: Data,
+                                    endpointURL url: URL) throws -> sending JSONStreamResponse {
+    let data = try processedData(fromResponseData: data, endpointURL: url)
+
+    let responseJSONObject: Any
+    do {
+      responseJSONObject = try JSONSerialization.jsonObject(with: data)
+    } catch {
+      throw FunctionsError(.dataLoss, userInfo: [NSUnderlyingErrorKey: error])
+    }
+
+    guard let responseJSON = responseJSONObject as? [String: Any] else {
+      let userInfo = [NSLocalizedDescriptionKey: "Response was not a dictionary."]
+      throw FunctionsError(.dataLoss, userInfo: userInfo)
+    }
+
+    if let _ = responseJSON["result"] {
+      return .result(responseJSON)
+    } else if let _ = responseJSON["message"] {
+      return .message(responseJSON)
+    } else {
+      throw FunctionsError(
+        .dataLoss,
+        userInfo: [NSLocalizedDescriptionKey: "Response is missing result or message field."]
+      )
+    }
+  }
+
+  private func jsonData(jsonText: String) throws -> Data {
+    guard let data = jsonText.data(using: .utf8) else {
+      throw FunctionsError(.dataLoss, userInfo: [
+        NSUnderlyingErrorKey: DecodingError.dataCorrupted(DecodingError.Context(
+          codingPath: [],
+          debugDescription: "Could not parse response as UTF8."
+        )),
+      ])
+    }
+    return data
+  }
+
+  private func makeRequestForStreamableContent(url: URL,
+                                               data: Any?,
+                                               options: HTTPSCallableOptions?,
+                                               timeout: TimeInterval,
+                                               context: FunctionsContext) throws
+    -> URLRequest {
+    var urlRequest = URLRequest(
+      url: url,
+      cachePolicy: .useProtocolCachePolicy,
+      timeoutInterval: timeout
+    )
+
+    let data = data ?? NSNull()
+    let encoded = try serializer.encode(data)
+    let body = ["data": encoded]
+    let payload = try JSONSerialization.data(withJSONObject: body, options: [.fragmentsAllowed])
+    urlRequest.httpBody = payload
+
+    // Set the headers for starting a streaming session.
+    urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+    urlRequest.httpMethod = "POST"
+
+    if let authToken = context.authToken {
+      let value = "Bearer \(authToken)"
+      urlRequest.setValue(value, forHTTPHeaderField: "Authorization")
+    }
+
+    if let fcmToken = context.fcmToken {
+      urlRequest.setValue(fcmToken, forHTTPHeaderField: Constants.fcmTokenHeader)
+    }
+
+    if options?.requireLimitedUseAppCheckTokens == true {
+      if let appCheckToken = context.limitedUseAppCheckToken {
+        urlRequest.setValue(
+          appCheckToken,
+          forHTTPHeaderField: Constants.appCheckTokenHeader
+        )
+      }
+    } else if let appCheckToken = context.appCheckToken {
+      urlRequest.setValue(
+        appCheckToken,
+        forHTTPHeaderField: Constants.appCheckTokenHeader
+      )
+    }
+
+    return urlRequest
+  }
+
+  private func makeFetcher(url: URL,
+                           data: Any?,
+                           options: HTTPSCallableOptions?,
+                           timeout: TimeInterval,
+                           context: FunctionsContext) throws -> GTMSessionFetcher {
+    let request = URLRequest(
+      url: url,
+      cachePolicy: .useProtocolCachePolicy,
+      timeoutInterval: timeout
+    )
+    let fetcher = fetcherService.fetcher(with: request)
+
+    let data = data ?? NSNull()
+    let encoded = try serializer.encode(data)
+    let body = ["data": encoded]
+    let payload = try JSONSerialization.data(withJSONObject: body)
+    fetcher.bodyData = payload
 
     // Set the headers.
     fetcher.setRequestValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -485,74 +749,62 @@ enum FunctionsConstants {
       fetcher.allowedInsecureSchemes = ["http"]
     }
 
-    fetcher.beginFetch { [self] data, error in
-      let result: Result<HTTPSCallableResult, any Error>
-      do {
-        let data = try responseData(data: data, error: error)
-        let json = try responseDataJSON(from: data)
-        // TODO: Refactor `decode(_:)` so it either returns a non-optional object or throws
-        let payload = try serializer.decode(json)
-        // TODO: Remove `as Any` once `decode(_:)` is refactored
-        result = .success(HTTPSCallableResult(data: payload as Any))
-      } catch {
-        result = .failure(error)
-      }
-
-      DispatchQueue.main.async {
-        completion(result)
-      }
-    }
+    return fetcher
   }
 
-  private func responseData(data: Data?, error: (any Error)?) throws -> Data {
-    // Case 1: `error` is not `nil` -> always throws
-    if let error = error as NSError? {
-      let localError: (any Error)?
-      if error.domain == kGTMSessionFetcherStatusDomain {
-        localError = FunctionsErrorCode.errorForResponse(
-          status: error.code,
-          body: data,
-          serializer: serializer
-        )
-      } else if error.domain == NSURLErrorDomain, error.code == NSURLErrorTimedOut {
-        localError = FunctionsErrorCode.deadlineExceeded.generatedError(userInfo: nil)
-      } else {
-        localError = nil
-      }
+  private func processedError(fromResponseError error: any Error,
+                              endpointURL url: URL) -> any Error {
+    let error = error as NSError
+    let localError: (any Error)? = if error.domain == kGTMSessionFetcherStatusDomain {
+      FunctionsError(
+        httpStatusCode: error.code,
+        region: region,
+        url: url,
+        body: error.userInfo["data"] as? Data,
+        serializer: serializer
+      )
+    } else if error.domain == NSURLErrorDomain, error.code == NSURLErrorTimedOut {
+      FunctionsError(.deadlineExceeded)
+    } else { nil }
 
-      throw localError ?? error
-    }
+    return localError ?? error
+  }
 
-    // Case 2: `data` is `nil` -> always throws
-    guard let data else {
-      throw FunctionsErrorCode.internal.generatedError(userInfo: nil)
-    }
+  private func callableResult(fromResponseData data: Data,
+                              endpointURL url: URL) throws -> sending HTTPSCallableResult {
+    let processedData = try processedData(fromResponseData: data, endpointURL: url)
+    let json = try responseDataJSON(from: processedData)
+    let payload = try serializer.decode(json)
+    return HTTPSCallableResult(data: payload)
+  }
 
-    // Case 3: `data` is not `nil` but might specify a custom error -> throws conditionally
-    if let bodyError = FunctionsErrorCode.errorForResponse(
-      status: 200,
+  private func processedData(fromResponseData data: Data, endpointURL url: URL) throws -> Data {
+    // `data` might specify a custom error. If so, throw the error.
+    if let bodyError = FunctionsError(
+      httpStatusCode: 200,
+      region: region,
+      url: url,
       body: data,
       serializer: serializer
     ) {
       throw bodyError
     }
 
-    // Case 4: `error` is `nil`; `data` is not `nil`; `data` doesn’t specify an error -> OK
     return data
   }
 
-  private func responseDataJSON(from data: Data) throws -> Any {
+  private func responseDataJSON(from data: Data) throws -> sending Any {
     let responseJSONObject = try JSONSerialization.jsonObject(with: data)
 
     guard let responseJSON = responseJSONObject as? NSDictionary else {
       let userInfo = [NSLocalizedDescriptionKey: "Response was not a dictionary."]
-      throw FunctionsErrorCode.internal.generatedError(userInfo: userInfo)
+      throw FunctionsError(.internal, userInfo: userInfo)
     }
 
     // `result` is checked for backwards compatibility:
     guard let dataJSON = responseJSON["data"] ?? responseJSON["result"] else {
       let userInfo = [NSLocalizedDescriptionKey: "Response is missing data field."]
-      throw FunctionsErrorCode.internal.generatedError(userInfo: userInfo)
+      throw FunctionsError(.internal, userInfo: userInfo)
     }
 
     return dataJSON

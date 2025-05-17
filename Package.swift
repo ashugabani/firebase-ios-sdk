@@ -19,12 +19,24 @@
 import class Foundation.ProcessInfo
 import PackageDescription
 
-let firebaseVersion = "11.2.0"
+let firebaseVersion = "11.13.0"
 
 let package = Package(
   name: "Firebase",
   platforms: [.iOS(.v12), .macCatalyst(.v13), .macOS(.v10_15), .tvOS(.v13), .watchOS(.v7)],
   products: [
+    .library(
+      name: "FirebaseAI",
+      targets: ["FirebaseAI"]
+    ),
+    // Backwards-compatibility library for existing "Vertex AI in Firebase" users.
+    .library(
+      name: "FirebaseVertexAI",
+      targets: [
+        "FirebaseAI",
+        "FirebaseVertexAI",
+      ]
+    ),
     .library(
       name: "FirebaseAnalytics",
       targets: ["FirebaseAnalyticsTarget"]
@@ -68,6 +80,10 @@ let package = Package(
     .library(
       name: "FirebaseStorageCombine-Community",
       targets: ["FirebaseStorageCombineSwift"]
+    ),
+    .library(
+      name: "FirebaseCore",
+      targets: ["FirebaseCore"]
     ),
     .library(
       name: "FirebaseCrashlytics",
@@ -117,10 +133,6 @@ let package = Package(
       name: "FirebaseStorage",
       targets: ["FirebaseStorage"]
     ),
-    .library(
-      name: "FirebaseVertexAI-Preview",
-      targets: ["FirebaseVertexAI"]
-    ),
   ],
   dependencies: [
     .package(
@@ -138,11 +150,11 @@ let package = Package(
     ),
     .package(
       url: "https://github.com/google/GoogleUtilities.git",
-      "8.0.0" ..< "9.0.0"
+      "8.1.0" ..< "9.0.0"
     ),
     .package(
       url: "https://github.com/google/gtm-session-fetcher.git",
-      "3.4.1" ..< "4.0.0"
+      "3.4.1" ..< "5.0.0"
     ),
     .package(
       url: "https://github.com/firebase/nanopb.git",
@@ -164,7 +176,7 @@ let package = Package(
     ),
     .package(
       url: "https://github.com/google/interop-ios-for-google-sdks.git",
-      "100.0.0" ..< "101.0.0"
+      "101.0.0" ..< "102.0.0"
     ),
     .package(url: "https://github.com/google/app-check.git",
              "11.0.1" ..< "12.0.0"),
@@ -175,6 +187,55 @@ let package = Package(
       path: "CoreOnly/Sources",
       publicHeadersPath: "./"
     ),
+
+    // MARK: - Firebase AI
+
+    .target(
+      name: "FirebaseAI",
+      dependencies: [
+        "FirebaseAppCheckInterop",
+        "FirebaseAuthInterop",
+        "FirebaseCore",
+        "FirebaseCoreExtension",
+      ],
+      path: "FirebaseAI/Sources"
+    ),
+    .testTarget(
+      name: "FirebaseAIUnit",
+      dependencies: [
+        "FirebaseAI",
+        "FirebaseStorage",
+      ],
+      path: "FirebaseAI/Tests/Unit",
+      resources: [
+        .copy("vertexai-sdk-test-data/mock-responses"),
+        .process("Resources"),
+      ],
+      cSettings: [
+        .headerSearchPath("../../../"),
+      ]
+    ),
+    // Backwards-compatibility targets for existing "Vertex AI in Firebase" users.
+    .target(
+      name: "FirebaseVertexAI",
+      dependencies: [
+        "FirebaseAI",
+      ],
+      path: "FirebaseVertexAI/Sources"
+    ),
+    .testTarget(
+      name: "FirebaseVertexAIUnit",
+      dependencies: [
+        "FirebaseVertexAI",
+      ],
+      path: "FirebaseVertexAI/Tests/Unit",
+      resources: [
+        .process("Resources"),
+      ]
+    ),
+
+    // MARK: - Firebase Core
+
     .target(
       name: "FirebaseCore",
       dependencies: [
@@ -299,8 +360,8 @@ let package = Package(
     ),
     .binaryTarget(
       name: "FirebaseAnalytics",
-      url: "https://dl.google.com/firebase/ios/swiftpm/11.1.0/FirebaseAnalytics.zip",
-      checksum: "7477b92093cc001e713a3442bcf8725b83764294452c04f36164c8706d224510"
+      url: "https://dl.google.com/firebase/ios/swiftpm/11.13.0/FirebaseAnalytics.zip",
+      checksum: "3c23a870df5fe9d7c36f2cfb9fb26e1cbccaa5fa0b12a28bc42d36cbc92bf909"
     ),
     .testTarget(
       name: "AnalyticsSwiftUnit",
@@ -415,6 +476,7 @@ let package = Package(
         "ObjC", "Public",
       ],
       resources: [.process("Resources/PrivacyInfo.xcprivacy")],
+      swiftSettings: Context.environment["FIREBASE_CI"] != nil ? [.define("FIREBASE_CI")] : [],
       linkerSettings: [
         .linkedFramework("Security"),
         .linkedFramework("SafariServices", .when(platforms: [.iOS])),
@@ -581,7 +643,9 @@ let package = Package(
       path: "FirebaseDatabase/Sources",
       exclude: [
         "third_party/Wrap-leveldb/LICENSE",
+        "third_party/SocketRocket/LICENSE",
         "third_party/FImmutableSortedDictionary/LICENSE",
+        "third_party/SocketRocket/aa2297808c225710e267afece4439c256f6efdb3",
       ],
       publicHeadersPath: "Public",
       cSettings: [
@@ -1290,38 +1354,6 @@ let package = Package(
         .headerSearchPath("../../.."),
       ]
     ),
-
-    // MARK: - Firebase Vertex AI
-
-    .target(
-      name: "FirebaseVertexAI",
-      dependencies: [
-        "FirebaseAppCheckInterop",
-        "FirebaseAuthInterop",
-        "FirebaseCore",
-        "FirebaseCoreExtension",
-      ],
-      path: "FirebaseVertexAI/Sources"
-    ),
-    .testTarget(
-      name: "FirebaseVertexAIUnit",
-      dependencies: ["FirebaseVertexAI"],
-      path: "FirebaseVertexAI/Tests/Unit",
-      resources: [
-        .process("vertexai-sdk-test-data/mock-responses"),
-      ],
-      cSettings: [
-        .headerSearchPath("../../../"),
-      ]
-    ),
-    .testTarget(
-      name: "FirebaseVertexAIIntegration",
-      dependencies: ["FirebaseVertexAI"],
-      path: "FirebaseVertexAI/Tests/Integration",
-      resources: [
-        .process("Resources"),
-      ]
-    ),
   ] + firestoreTargets(),
   cLanguageStandard: .c99,
   cxxLanguageStandard: CXXLanguageStandard.gnucxx14
@@ -1338,7 +1370,7 @@ func googleAppMeasurementDependency() -> Package.Dependency {
     return .package(url: appMeasurementURL, branch: "main")
   }
 
-  return .package(url: appMeasurementURL, exact: "11.1.0")
+  return .package(url: appMeasurementURL, exact: "11.13.0")
 }
 
 func abseilDependency() -> Package.Dependency {
@@ -1349,12 +1381,12 @@ func abseilDependency() -> Package.Dependency {
   if ProcessInfo.processInfo.environment["FIREBASE_SOURCE_FIRESTORE"] != nil {
     packageInfo = (
       "https://github.com/firebase/abseil-cpp-SwiftPM.git",
-      "0.20240116.1" ..< "0.20240117.0"
+      "0.20240722.0" ..< "0.20240723.0"
     )
   } else {
     packageInfo = (
       "https://github.com/google/abseil-cpp-binary.git",
-      "1.2024011602.0" ..< "1.2024011700.0"
+      "1.2024072200.0" ..< "1.2024072300.0"
     )
   }
 
@@ -1367,9 +1399,9 @@ func grpcDependency() -> Package.Dependency {
   // If building Firestore from source, abseil will need to be built as source
   // as the headers in the binary version of abseil are unusable.
   if ProcessInfo.processInfo.environment["FIREBASE_SOURCE_FIRESTORE"] != nil {
-    packageInfo = ("https://github.com/grpc/grpc-ios.git", "1.65.0" ..< "1.66.0")
+    packageInfo = ("https://github.com/grpc/grpc-ios.git", "1.69.0" ..< "1.70.0")
   } else {
-    packageInfo = ("https://github.com/google/grpc-binary.git", "1.65.1" ..< "1.66.0")
+    packageInfo = ("https://github.com/google/grpc-binary.git", "1.69.0" ..< "1.70.0")
   }
 
   return .package(url: packageInfo.url, packageInfo.range)
@@ -1507,8 +1539,8 @@ func firestoreTargets() -> [Target] {
     } else {
       return .binaryTarget(
         name: "FirebaseFirestoreInternal",
-        url: "https://dl.google.com/firebase/ios/bin/firestore/11.2.0/rc0/FirebaseFirestoreInternal.zip",
-        checksum: "821acae8d3b79c6d35539d87926da8aeae4a63878bec2987b01cb885b5120df2"
+        url: "https://dl.google.com/firebase/ios/bin/firestore/11.13.0/rc0/FirebaseFirestoreInternal.zip",
+        checksum: "badb559c67f683d546873051642db7eaab3598e50f8095dc15d965d63a695145"
       )
     }
   }()

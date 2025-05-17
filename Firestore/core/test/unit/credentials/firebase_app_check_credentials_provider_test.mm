@@ -18,8 +18,8 @@
 
 #import <FirebaseAppCheckInterop/FirebaseAppCheckInterop.h>
 
-#include <chrono>  // NOLINT(build/c++11)
-#include <future>  // NOLINT(build/c++11)
+#include <chrono>
+#include <future>
 
 #import "FirebaseCore/Extension/FIRAppInternal.h"
 
@@ -181,7 +181,7 @@ TEST(FirebaseAppCheckCredentialsProviderTest, ListenForTokenChanges) {
 
 // Regression test for https://github.com/firebase/firebase-ios-sdk/issues/8895
 TEST(FirebaseAppCheckCredentialsProviderTest,
-     ListenForTokenChangesIgnoresUnrelatedNotifcations) {
+     ListenForTokenChangesIgnoresUnrelatedNotifications) {
   auto token_promise = std::make_shared<std::promise<std::string>>();
 
   FIRApp* app = testutil::AppForUnitTesting();

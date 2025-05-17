@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import FirebaseAppCheckInterop
-import FirebaseAuthInterop
-import FirebaseMessagingInterop
+@preconcurrency import FirebaseAppCheckInterop
+@preconcurrency import FirebaseAuthInterop
+@preconcurrency import FirebaseMessagingInterop
 import Foundation
 
 /// `FunctionsContext` is a helper object that holds metadata for a function call.
@@ -25,7 +25,7 @@ struct FunctionsContext {
   let limitedUseAppCheckToken: String?
 }
 
-struct FunctionsContextProvider {
+struct FunctionsContextProvider: Sendable {
   private let auth: AuthInterop?
   private let messaging: MessagingInterop?
   private let appCheck: AppCheckInterop?
@@ -36,12 +36,52 @@ struct FunctionsContextProvider {
     self.appCheck = appCheck
   }
 
-  // TODO: Implement async await version
-//  @available(macOS 10.15.0, *)
-//  internal func getContext() async throws -> FunctionsContext {
-//    return FunctionsContext(authToken: nil, fcmToken: nil, appCheckToken: nil)
-//
-//  }
+  @available(iOS 13, macCatalyst 13, macOS 10.15, tvOS 13, watchOS 7, *)
+  func context(options: HTTPSCallableOptions?) async throws -> FunctionsContext {
+    async let authToken = auth?.getToken(forcingRefresh: false)
+    async let appCheckToken = getAppCheckToken(options: options)
+    async let limitedUseAppCheckToken = getLimitedUseAppCheckToken(options: options)
+
+    // Only `authToken` is throwing, but the formatter script removes the `try`
+    // from `try authToken` and puts it in front of the initializer call.
+    return try await FunctionsContext(
+      authToken: authToken,
+      fcmToken: messaging?.fcmToken,
+      appCheckToken: appCheckToken,
+      limitedUseAppCheckToken: limitedUseAppCheckToken
+    )
+  }
+
+  @available(iOS 13, macCatalyst 13, macOS 10.15, tvOS 13, watchOS 7, *)
+  private func getAppCheckToken(options: HTTPSCallableOptions?) async -> String? {
+    guard
+      options?.requireLimitedUseAppCheckTokens != true,
+      let tokenResult = await appCheck?.getToken(forcingRefresh: false)
+    else { return nil }
+    // The placeholder token should be used in the case of App Check error.
+    return tokenResult.token
+  }
+
+  @available(iOS 13, macCatalyst 13, macOS 10.15, tvOS 13, watchOS 7, *)
+  private func getLimitedUseAppCheckToken(options: HTTPSCallableOptions?) async -> String? {
+    // At the moment, `await` doesn’t get along with Objective-C’s optional protocol methods.
+    await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+      guard
+        options?.requireLimitedUseAppCheckTokens == true,
+        let appCheck,
+        // `getLimitedUseToken(completion:)` is an optional protocol method. Optional binding
+        // is performed to make sure `continuation` is called even if the method’s not implemented.
+        let limitedUseTokenClosure = appCheck.getLimitedUseToken
+      else {
+        return continuation.resume(returning: nil)
+      }
+
+      limitedUseTokenClosure { tokenResult in
+        // The placeholder token should be used in the case of App Check error.
+        continuation.resume(returning: tokenResult.token)
+      }
+    }
+  }
 
   func getContext(options: HTTPSCallableOptions? = nil,
                   _ completion: @escaping ((FunctionsContext, Error?) -> Void)) {
@@ -66,19 +106,21 @@ struct FunctionsContextProvider {
       dispatchGroup.enter()
 
       if options?.requireLimitedUseAppCheckTokens == true {
-        appCheck.getLimitedUseToken? { tokenResult in
-          // Send only valid token to functions.
-          if tokenResult.error == nil {
+        // `getLimitedUseToken(completion:)` is an optional protocol method.
+        // If it’s not implemented, we still need to leave the dispatch group.
+        if let limitedUseTokenClosure = appCheck.getLimitedUseToken {
+          limitedUseTokenClosure { tokenResult in
+            // In the case of an error, the token will be the placeholder token.
             limitedUseAppCheckToken = tokenResult.token
+            dispatchGroup.leave()
           }
+        } else {
           dispatchGroup.leave()
         }
       } else {
         appCheck.getToken(forcingRefresh: false) { tokenResult in
-          // Send only valid token to functions.
-          if tokenResult.error == nil {
-            appCheckToken = tokenResult.token
-          }
+          // In the case of an error, the token will be the placeholder token.
+          appCheckToken = tokenResult.token
           dispatchGroup.leave()
         }
       }

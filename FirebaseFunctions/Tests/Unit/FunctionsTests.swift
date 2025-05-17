@@ -79,26 +79,34 @@ class FunctionsTests: XCTestCase {
     XCTAssertEqual(functions1, functions2)
   }
 
-  func testURLWithName() throws {
-    let url = try XCTUnwrap(functions?.urlWithName("my-endpoint"))
-    XCTAssertEqual(url, "https://my-region-my-project.cloudfunctions.net/my-endpoint")
+  func testFunctionURLForName() throws {
+    XCTAssertEqual(
+      functions?.functionURL(for: "my-endpoint")?.absoluteString,
+      "https://my-region-my-project.cloudfunctions.net/my-endpoint"
+    )
   }
 
-  func testRegionWithEmulator() throws {
+  func testFunctionURLForNameEmulator() throws {
     functionsCustomDomain?.useEmulator(withHost: "localhost", port: 5005)
-    let url = try XCTUnwrap(functionsCustomDomain?.urlWithName("my-endpoint"))
-    XCTAssertEqual(url, "http://localhost:5005/my-project/my-region/my-endpoint")
+    XCTAssertEqual(
+      functionsCustomDomain?.functionURL(for: "my-endpoint")?.absoluteString,
+      "http://localhost:5005/my-project/my-region/my-endpoint"
+    )
   }
 
-  func testRegionWithEmulatorWithScheme() throws {
+  func testFunctionURLForNameRegionWithEmulatorWithScheme() throws {
     functionsCustomDomain?.useEmulator(withHost: "http://localhost", port: 5005)
-    let url = try XCTUnwrap(functionsCustomDomain?.urlWithName("my-endpoint"))
-    XCTAssertEqual(url, "http://localhost:5005/my-project/my-region/my-endpoint")
+    XCTAssertEqual(
+      functionsCustomDomain?.functionURL(for: "my-endpoint")?.absoluteString,
+      "http://localhost:5005/my-project/my-region/my-endpoint"
+    )
   }
 
-  func testCustomDomain() throws {
-    let url = try XCTUnwrap(functionsCustomDomain?.urlWithName("my-endpoint"))
-    XCTAssertEqual(url, "https://mydomain.com/my-endpoint")
+  func testFunctionURLForNameCustomDomain() throws {
+    XCTAssertEqual(
+      functionsCustomDomain?.functionURL(for: "my-endpoint")?.absoluteString,
+      "https://mydomain.com/my-endpoint"
+    )
   }
 
   func testSetEmulatorSettings() throws {
@@ -207,18 +215,22 @@ class FunctionsTests: XCTestCase {
     waitForExpectations(timeout: 1.5)
   }
 
-  func testCallFunctionWhenLimitedUseAppCheckTokenCannotBeGeneratedThenCallWithoutToken() {
+  func testCallFunctionWhenLimitedUseAppCheckTokenCannotBeGeneratedThenCallWithPlaceholderToken() {
     // Given
     appCheckFake.limitedUseTokenResult = FIRAppCheckTokenResultFake(
-      token: "dummy token",
+      token: "limited use token",
       error: NSError(domain: #function, code: -1)
     )
 
     let httpRequestExpectation = expectation(description: "HTTPRequestExpectation")
     fetcherService.testBlock = { fetcherToTest, testResponse in
       // Assert that header does not contain an AppCheck token.
-      fetcherToTest.request?.allHTTPHeaderFields?.forEach { key, _ in
-        XCTAssertNotEqual(key, "X-Firebase-AppCheck")
+      do {
+        let appCheckHeader = try XCTUnwrap(fetcherToTest.request?
+          .allHTTPHeaderFields?["X-Firebase-AppCheck"])
+        XCTAssertEqual(appCheckHeader, self.appCheckFake.limitedUseTokenResult.token)
+      } catch {
+        XCTFail("Unexpected failure: \(error)")
       }
 
       testResponse(nil, "{\"data\":\"May the force be with you!\"}".data(using: .utf8), nil)
@@ -278,11 +290,43 @@ class FunctionsTests: XCTestCase {
         }
 
         XCTAssertEqual(error as NSError, networkError)
-
+        XCTAssert(Thread.isMainThread)
         completionExpectation.fulfill()
       }
 
     waitForExpectations(timeout: 1.5)
+  }
+
+  func testAsyncCallFunctionWhenAppCheckIsNotInstalled() async {
+    let networkError = NSError(
+      domain: "testCallFunctionWhenAppCheckIsInstalled",
+      code: -1,
+      userInfo: nil
+    )
+
+    let httpRequestExpectation = expectation(description: "HTTPRequestExpectation")
+    fetcherService.testBlock = { fetcherToTest, testResponse in
+      let appCheckTokenHeader = fetcherToTest.request?
+        .value(forHTTPHeaderField: "X-Firebase-AppCheck")
+      XCTAssertNil(appCheckTokenHeader)
+      testResponse(nil, nil, networkError)
+      httpRequestExpectation.fulfill()
+    }
+
+    do {
+      _ = try await functionsCustomDomain?
+        .callFunction(
+          at: URL(string: "https://example.com/fake_func")!,
+          withObject: nil,
+          options: nil,
+          timeout: 10
+        )
+      XCTFail("Expected an error")
+    } catch {
+      XCTAssertEqual(error as NSError, networkError)
+    }
+
+    await fulfillment(of: [httpRequestExpectation], timeout: 1.5)
   }
 
   func testCallFunctionWhenAppCheckIsNotInstalled() {
@@ -303,7 +347,7 @@ class FunctionsTests: XCTestCase {
 
     let completionExpectation = expectation(description: "completionExpectation")
     functionsCustomDomain?.callFunction(
-      name: "fake_func",
+      at: URL(string: "https://example.com/fake_func")!,
       withObject: nil,
       options: nil,
       timeout: 10

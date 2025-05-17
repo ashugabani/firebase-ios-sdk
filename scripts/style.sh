@@ -56,7 +56,7 @@ version="${version/ (*)/}"
 version="${version/.*/}"
 
 case "$version" in
-  18)
+  20)
     ;;
   google3-trunk)
     echo "Please use a publicly released clang-format; a recent LLVM release"
@@ -65,13 +65,12 @@ case "$version" in
     exit 1
     ;;
   *)
-    echo "Please upgrade to clang-format version 18."
+    echo "Please upgrade to clang-format version 20."
     echo "If it's installed via homebrew you can run:"
     echo "brew upgrade clang-format"
     exit 1
     ;;
 esac
-
 # Ensure that tools in `Mintfile` are installed locally to avoid permissions
 # problems that would otherwise arise from the default of installing in
 # /usr/local.
@@ -95,7 +94,7 @@ clang_options=(-style=file)
 
 # Swift formatting options for the repo should be configured in
 # https://github.com/firebase/firebase-ios-sdk/blob/main/.swiftformat.
-# These may be overriden with additional `.swiftformat` files in subdirectories.
+# These may be overridden with additional `.swiftformat` files in subdirectories.
 swift_options=()
 
 if [[ $# -gt 0 && "$1" == "test-only" ]]; then
@@ -153,6 +152,9 @@ s%^./%%
 # Generated source
 \%/Firestore/core/src/util/config.h% d
 
+# Generated Code for Data Connect sample
+\%/Examples/FriendlyFlix/app/FriendlyFlixSDK/% d
+
 # Sources pulled in by travis bundler, with and without a leading slash
 \%^/?vendor/bundle/% d
 
@@ -178,14 +180,10 @@ s%^./%%
 needs_formatting=false
 for f in $files; do
   if [[ "${f: -6}" == '.swift' ]]; then
-    if [[ "$system" == 'Darwin' ]]; then
-      # Match output that says:
-      # 1/1 files would have been formatted.  (with --dryrun)
-      # 1/1 files formatted.                  (without --dryrun)
-      mint run swiftformat "${swift_options[@]}" "$f" 2>&1 | grep '^1/1 files' > /dev/null
-    else
-      false
-    fi
+    # Match output that says:
+    # 1/1 files would have been formatted.  (with --dryrun)
+    # 1/1 files formatted.                  (without --dryrun)
+    mint run swiftformat "${swift_options[@]}" "$f" 2>&1 | grep '^1/1 files' > /dev/null
   else
     "$clang_format_bin" "${clang_options[@]}" "$f" | grep "<replacement " > /dev/null
   fi
